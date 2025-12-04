@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-inter: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-casino-darker text-casino-text antialiased;
+    font-family: var(--font-inter);
+    min-height: 100vh;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-casino-darker;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-casino-border rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-casino-muted;
+  }
+
+  /* Focus styles for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-casino-dark;
+  }
+
+  /* Selection color */
+  ::selection {
+    @apply bg-blue-500/30;
+  }
+}
+
+@layer components {
+  /* Form element focus states */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+
+  /* Checkbox styling */
+  input[type="checkbox"] {
+    @apply rounded border-casino-border bg-casino-dark cursor-pointer;
+  }
+
+  input[type="checkbox"]:checked {
+    @apply bg-blue-600 border-blue-600;
+  }
+
+  /* Toast animations */
+  .toast-enter {
+    @apply animate-slide-up;
+  }
+
+  /* Chart tooltip */
+  .recharts-tooltip-wrapper {
+    @apply z-50;
+  }
+
+  /* Shimmer animation for progress bars */
+  @keyframes shimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+}
+
+@layer utilities {
+  /* Hide scrollbar utility */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Text gradient utility */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r;
+  }
+
+  /* Glass effect */
+  .glass {
+    @apply bg-casino-card/80 backdrop-blur-lg;
+  }
+
+  /* Card hover effect */
+  .card-hover {
+    @apply transition-all duration-200 hover:border-casino-muted hover:shadow-lg hover:shadow-black/20;
+  }
+}
