@@ -40,7 +40,18 @@ export type BetDetail =
   | ColumnBetDetail
   | EvenMoneyBetDetail;
 
-export type BetSizing = number | 'all-in' | 'half-bankroll' | 'let-it-ride';
+// Legacy bet sizing (for backwards compatibility)
+export type LegacyBetSizing = number | 'all-in' | 'half-bankroll' | 'let-it-ride';
+
+// New bet sizing options for advanced step progression
+export type BetSizing =
+  | number                    // Fixed amount (e.g., 10)
+  | 'all-in'                  // Legacy: bet entire bankroll
+  | 'half-bankroll'           // Legacy: bet half bankroll
+  | 'let-it-ride'             // Legacy: bet previous winnings
+  | 'bullet'                  // Use bullet size from strategy
+  | 'carry'                   // Use full carry amount from previous step
+  | 'carry_split';            // Split carry evenly across bets in step
 
 export interface Bet {
   betType: BetType;
@@ -48,13 +59,36 @@ export interface Bet {
   betDetail: BetDetail;
 }
 
+// Step action types for win tier branching
+export type StepActionType = 'next_step' | 'repeat_step' | 'goto_step' | 'restart';
+
+export interface StepAction {
+  type: StepActionType;
+  targetStepId?: string;                    // For goto_step
+  pocket?: number | 'all';                  // Amount to add to bankroll (profit lock-in)
+  carryAmount?: number | 'all' | 'remainder'; // What to carry to next step/action
+}
+
+export interface WinTier {
+  name: string;             // Display name (e.g., "Single Hit", "Double Hit")
+  minPayout: number;        // Minimum payout to trigger this tier (inclusive)
+  maxPayout?: number;       // Maximum payout for this tier (exclusive)
+  action: StepAction;
+}
+
 export interface BetStep {
   id: string;
   bets: Bet[];
-  continueOnWin: boolean;
-  resetOnLoss: boolean;
-  nextStepOnWin?: string; // step id to go to on win, undefined = next step
-  nextStepOnLoss?: string; // step id to go to on loss, undefined = reset
+
+  // Legacy fields (for backwards compatibility with existing strategies)
+  continueOnWin?: boolean;
+  resetOnLoss?: boolean;
+  nextStepOnWin?: string;
+  nextStepOnLoss?: string;
+
+  // New advanced step progression fields
+  winTiers?: WinTier[];      // Evaluated in order, first matching tier wins
+  onLoss?: StepAction;       // What happens when ALL bets lose
 }
 
 export interface BettingStrategy {
@@ -66,6 +100,7 @@ export interface BettingStrategy {
   targetBankroll: number;
   maxIterations: number;
   maxDrawdown?: number;
+  bulletSize?: number;        // Fixed amount per attempt (e.g., $10). If not set, uses legacy behavior.
   createdAt: number;
   modifiedAt: number;
   isPreloaded?: boolean;
@@ -77,6 +112,9 @@ export interface SpinResult {
   payout: number;
   profit: number;
   stepId: string;
+  stepIndex: number;          // Index of the step (for statistics)
+  tierTriggered?: string;     // Name of the win tier that was triggered (if any)
+  actionTaken?: StepActionType; // What action was taken after this spin
 }
 
 export interface SingleSimulationResult {
@@ -86,7 +124,24 @@ export interface SingleSimulationResult {
   maxDrawdown: number;
   bankrollHistory: number[];
   spinResults: SpinResult[];
-  endReason: 'goal_reached' | 'bankruptcy' | 'max_iterations' | 'max_drawdown';
+  endReason: 'goal_reached' | 'bankruptcy' | 'max_iterations' | 'max_drawdown' | 'insufficient_funds';
+  completedCycles: number;    // Number of times all steps were completed (restart count)
+}
+
+// Statistics for each step across all simulations
+export interface TierOutcome {
+  tierName: string;
+  count: number;
+  totalPayout: number;
+}
+
+export interface StepStatistics {
+  stepIndex: number;
+  stepId: string;
+  timesReached: number;
+  timesWon: number;           // Any win (any tier triggered)
+  timesLost: number;          // All bets lost
+  tierOutcomes: TierOutcome[];
 }
 
 export interface SimulationResults {
@@ -103,6 +158,8 @@ export interface SimulationResults {
   finalBankrollDistribution: number[];
   allSimulations: SingleSimulationResult[];
   timestamp: number;
+  stepStatistics?: StepStatistics[];  // Aggregated stats per step
+  avgCompletedCycles?: number;        // Average number of completed cycles per simulation
 }
 
 export interface SimulationParameters {

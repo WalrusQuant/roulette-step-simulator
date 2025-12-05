@@ -352,6 +352,123 @@ export const PRELOADED_STRATEGIES: BettingStrategy[] = [
     modifiedAt: Date.now(),
     isPreloaded: true,
   },
+  // === ADVANCED MODE STRATEGIES ===
+  {
+    id: 'house-money-ladder',
+    name: 'House Money Ladder',
+    description: 'Use house money to climb to high-payout bets. Win on outside, build with dozen+column overlap, then spread across straights. Uses advanced win tiers.',
+    bulletSize: 10,
+    steps: [
+      {
+        id: 'step1-seed',
+        bets: [{ betType: 'even_money', betAmount: 'bullet', betDetail: 'red' }],
+        winTiers: [
+          {
+            name: 'Win',
+            minPayout: 1,
+            action: { type: 'next_step', carryAmount: 'all' },
+          },
+        ],
+        onLoss: { type: 'restart' },
+      },
+      {
+        id: 'step2-build',
+        bets: [
+          { betType: 'dozen', betAmount: 'carry_split', betDetail: '2nd' },
+          { betType: 'column', betAmount: 'carry_split', betDetail: '2nd' },
+        ],
+        winTiers: [
+          // Double hit first (higher payout threshold)
+          {
+            name: 'Double Hit',
+            minPayout: 50,
+            action: { type: 'next_step', carryAmount: 'all' },
+          },
+          // Single hit - pocket profit and repeat
+          {
+            name: 'Single Hit',
+            minPayout: 20,
+            action: { type: 'repeat_step', pocket: 10, carryAmount: 'remainder' },
+          },
+        ],
+        onLoss: { type: 'restart' },
+      },
+      {
+        id: 'step3-spread',
+        bets: [
+          { betType: 'straight', betAmount: 'carry_split', betDetail: 14 },
+          { betType: 'straight', betAmount: 'carry_split', betDetail: 17 },
+          { betType: 'corner', betAmount: 'carry_split', betDetail: [13, 14, 16, 17] },
+          { betType: 'corner', betAmount: 'carry_split', betDetail: [17, 18, 20, 21] },
+        ],
+        winTiers: [
+          {
+            name: 'Any Win',
+            minPayout: 0,
+            action: { type: 'restart', pocket: 'all' },
+          },
+        ],
+        onLoss: { type: 'restart' },
+      },
+    ],
+    initialBankroll: 100,
+    targetBankroll: 200,
+    maxIterations: 500,
+    maxDrawdown: 100,
+    createdAt: Date.now(),
+    modifiedAt: Date.now(),
+    isPreloaded: true,
+  },
+  {
+    id: 'parlay-progression',
+    name: 'Parlay Progression',
+    description: 'Progressive parlay system using carry forward. Build winnings through safer bets before attempting higher payouts.',
+    bulletSize: 5,
+    steps: [
+      {
+        id: 'step1-base',
+        bets: [{ betType: 'even_money', betAmount: 'bullet', betDetail: 'black' }],
+        winTiers: [
+          {
+            name: 'Win',
+            minPayout: 1,
+            action: { type: 'next_step', carryAmount: 'all' },
+          },
+        ],
+        onLoss: { type: 'restart' },
+      },
+      {
+        id: 'step2-double',
+        bets: [{ betType: 'column', betAmount: 'carry', betDetail: '2nd' }],
+        winTiers: [
+          {
+            name: 'Win',
+            minPayout: 1,
+            action: { type: 'next_step', carryAmount: 'all' },
+          },
+        ],
+        onLoss: { type: 'restart' },
+      },
+      {
+        id: 'step3-split',
+        bets: [{ betType: 'double_street', betAmount: 'carry', betDetail: 13 }],
+        winTiers: [
+          {
+            name: 'Win',
+            minPayout: 1,
+            action: { type: 'restart', pocket: 'all' },
+          },
+        ],
+        onLoss: { type: 'restart' },
+      },
+    ],
+    initialBankroll: 50,
+    targetBankroll: 100,
+    maxIterations: 300,
+    createdAt: Date.now(),
+    modifiedAt: Date.now(),
+    isPreloaded: true,
+  },
 ];
 
 /**

@@ -97,42 +97,49 @@ export default function AnalyticsPage() {
             <h2 className="text-xl font-semibold text-white mb-4">
               Overall Statistics
             </h2>
-            <StatsGrid
-              stats={[
-                {
-                  label: 'Total Simulations Run',
-                  value: history.reduce((sum, h) => sum + h.numSimulations, 0).toLocaleString(),
-                  icon: <BarChart3 className="w-5 h-5" />,
-                  variant: 'info',
-                },
-                {
-                  label: 'Strategies Tested',
-                  value: new Set(history.map((h) => h.strategyId)).size,
-                  icon: <Target className="w-5 h-5" />,
-                  variant: 'default',
-                },
-                {
-                  label: 'Avg Success Rate',
-                  value: formatPercent(
-                    history.reduce((sum, h) => sum + h.successRate, 0) / history.length
-                  ),
-                  icon: <TrendingUp className="w-5 h-5" />,
-                  variant: 'success',
-                },
-                {
-                  label: 'Avg Bankruptcy Rate',
-                  value: formatPercent(
-                    history.reduce(
-                      (sum, h) => sum + (h.bankruptcyCount / h.numSimulations) * 100,
-                      0
-                    ) / history.length
-                  ),
-                  icon: <AlertTriangle className="w-5 h-5" />,
-                  variant: 'danger',
-                },
-              ]}
-              columns={4}
-            />
+            {(() => {
+              // Calculate weighted averages based on number of simulations
+              const totalSimulations = history.reduce((sum, h) => sum + h.numSimulations, 0);
+              const weightedSuccessRate = totalSimulations > 0
+                ? history.reduce((sum, h) => sum + (h.successRate * h.numSimulations), 0) / totalSimulations
+                : 0;
+              const totalBankruptcies = history.reduce((sum, h) => sum + h.bankruptcyCount, 0);
+              const weightedBankruptcyRate = totalSimulations > 0
+                ? (totalBankruptcies / totalSimulations) * 100
+                : 0;
+
+              return (
+                <StatsGrid
+                  stats={[
+                    {
+                      label: 'Total Simulations Run',
+                      value: totalSimulations.toLocaleString(),
+                      icon: <BarChart3 className="w-5 h-5" />,
+                      variant: 'info',
+                    },
+                    {
+                      label: 'Strategies Tested',
+                      value: new Set(history.map((h) => h.strategyId)).size,
+                      icon: <Target className="w-5 h-5" />,
+                      variant: 'default',
+                    },
+                    {
+                      label: 'Avg Success Rate',
+                      value: formatPercent(weightedSuccessRate),
+                      icon: <TrendingUp className="w-5 h-5" />,
+                      variant: 'success',
+                    },
+                    {
+                      label: 'Avg Bankruptcy Rate',
+                      value: formatPercent(weightedBankruptcyRate),
+                      icon: <AlertTriangle className="w-5 h-5" />,
+                      variant: 'danger',
+                    },
+                  ]}
+                  columns={4}
+                />
+              );
+            })()}
           </div>
 
           {/* Recent Results */}

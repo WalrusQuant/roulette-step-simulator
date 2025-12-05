@@ -9,7 +9,7 @@ import { Button } from './Button';
 import { Input } from './Input';
 import { Card, CardHeader, CardTitle, CardContent } from './Card';
 import { StepEditor } from './StepEditor';
-import { Plus, Save, Play, AlertTriangle } from 'lucide-react';
+import { Plus, Save, Play, AlertTriangle, Zap } from 'lucide-react';
 import { cn } from '@/app/lib/utils';
 
 export interface StrategyBuilderProps {
@@ -30,11 +30,17 @@ export function StrategyBuilder({
   );
   const [errors, setErrors] = useState<string[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [useAdvancedMode, setUseAdvancedMode] = useState(false);
 
   useEffect(() => {
     if (initialStrategy) {
       setStrategy(initialStrategy);
       setHasChanges(false);
+      // Auto-detect advanced mode
+      setUseAdvancedMode(
+        initialStrategy.bulletSize !== undefined ||
+        initialStrategy.steps.some(s => s.winTiers !== undefined && s.winTiers.length > 0)
+      );
     }
   }, [initialStrategy]);
 
@@ -53,9 +59,21 @@ export function StrategyBuilder({
   const addStep = () => {
     const newStep: BetStep = {
       id: uuidv4(),
-      bets: [{ betType: 'even_money', betAmount: 10, betDetail: 'red' }],
+      bets: [{
+        betType: 'even_money',
+        betAmount: useAdvancedMode ? 'carry_split' : 10,
+        betDetail: 'red',
+      }],
       continueOnWin: true,
       resetOnLoss: true,
+      ...(useAdvancedMode && {
+        winTiers: [{
+          name: 'Win',
+          minPayout: 0,
+          action: { type: 'next_step', carryAmount: 'all' },
+        }],
+        onLoss: { type: 'restart' },
+      }),
     };
     updateStrategy({ steps: [...strategy.steps, newStep] });
   };
@@ -64,6 +82,23 @@ export function StrategyBuilder({
     if (strategy.steps.length <= 1) return;
     const newSteps = strategy.steps.filter((_, i) => i !== index);
     updateStrategy({ steps: newSteps });
+  };
+
+  const toggleAdvancedMode = () => {
+    const newMode = !useAdvancedMode;
+    setUseAdvancedMode(newMode);
+
+    if (newMode) {
+      // Enable advanced mode - set bullet size
+      updateStrategy({
+        bulletSize: Math.min(strategy.initialBankroll, 10),
+      });
+    } else {
+      // Disable advanced mode - remove bullet size
+      const { bulletSize, ...rest } = strategy;
+      setStrategy({ ...rest, modifiedAt: Date.now() });
+      setHasChanges(true);
+    }
   };
 
   const handleSave = () => {
@@ -85,12 +120,30 @@ export function StrategyBuilder({
     onRun?.(strategy);
   };
 
+  const allStepIds = strategy.steps.map(s => s.id);
+
   return (
     <div className="space-y-6">
       {/* Strategy Info */}
       <Card variant="bordered">
         <CardHeader>
-          <CardTitle>Strategy Details</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Strategy Details</CardTitle>
+            {!readOnly && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleAdvancedMode}
+                className={cn(
+                  "flex items-center gap-2 text-xs",
+                  useAdvancedMode ? "text-casino-accent bg-casino-accent/10" : "text-casino-muted"
+                )}
+              >
+                <Zap className="w-4 h-4" />
+                {useAdvancedMode ? 'Advanced Mode' : 'Enable Advanced Mode'}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -132,6 +185,24 @@ export function StrategyBuilder({
               }
               disabled={readOnly}
             />
+
+            {/* Bullet Size - only shown in advanced mode */}
+            {useAdvancedMode && (
+              <Input
+                label="Bullet Size ($)"
+                type="number"
+                min={1}
+                value={strategy.bulletSize || 10}
+                onChange={(e) =>
+                  updateStrategy({
+                    bulletSize: Math.max(1, parseInt(e.target.value) || 1),
+                  })
+                }
+                disabled={readOnly}
+                helperText="Fixed amount taken from bankroll per attempt cycle"
+              />
+            )}
+
             <Input
               label="Max Iterations"
               type="number"
@@ -160,6 +231,23 @@ export function StrategyBuilder({
               helperText="Stop if losses exceed this amount (0 = no limit)"
             />
           </div>
+
+          {/* Advanced Mode Info */}
+          {useAdvancedMode && (
+            <div className="mt-4 p-3 bg-casino-accent/10 border border-casino-accent/30 rounded-lg">
+              <div className="flex items-start gap-2">
+                <Zap className="w-4 h-4 text-casino-accent flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-casino-muted">
+                  <p className="text-casino-accent font-medium mb-1">Advanced Mode Active</p>
+                  <p>
+                    Use win tiers to branch based on payout amount. Bullet size is taken from
+                    bankroll at the start of each attempt cycle. Carry winnings forward through
+                    steps, and pocket profits along the way.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -189,6 +277,8 @@ export function StrategyBuilder({
               onChange={(updatedStep) => updateStep(index, updatedStep)}
               onDelete={() => removeStep(index)}
               canDelete={strategy.steps.length > 1 && !readOnly}
+              allStepIds={allStepIds}
+              useAdvancedMode={useAdvancedMode}
             />
           ))}
         </div>

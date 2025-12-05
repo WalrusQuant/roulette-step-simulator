@@ -2,6 +2,8 @@ import {
   BettingStrategy,
   SimulationResults,
   SingleSimulationResult,
+  StepStatistics,
+  TierOutcome,
 } from './types';
 import { runSingleSimulation, calculateExpectedValue } from './roulette';
 
@@ -30,6 +32,27 @@ export async function runSimulations(
   let bankruptcyCount = 0;
   let totalIterationsToSuccess = 0;
   let totalMaxDrawdown = 0;
+  let totalCompletedCycles = 0;
+
+  // Initialize step statistics tracking
+  const stepStatsMap: Map<number, {
+    stepId: string;
+    timesReached: number;
+    timesWon: number;
+    timesLost: number;
+    tierOutcomes: Map<string, { count: number; totalPayout: number }>;
+  }> = new Map();
+
+  // Initialize map with all steps from strategy
+  strategy.steps.forEach((step, index) => {
+    stepStatsMap.set(index, {
+      stepId: step.id,
+      timesReached: 0,
+      timesWon: 0,
+      timesLost: 0,
+      tierOutcomes: new Map(),
+    });
+  });
 
   for (let i = 0; i < numSimulations; i++) {
     const result = runSingleSimulation(strategy);
@@ -41,11 +64,42 @@ export async function runSimulations(
       totalIterationsToSuccess += result.iterations;
     }
 
-    if (result.finalBankroll <= 0) {
+    // Count both true bankruptcy (bankroll <= 0) and insufficient funds as bankruptcies
+    // since insufficient_funds means unable to continue betting (functional bankruptcy)
+    if (result.endReason === 'bankruptcy' || result.endReason === 'insufficient_funds') {
       bankruptcyCount++;
     }
 
     totalMaxDrawdown += result.maxDrawdown;
+    totalCompletedCycles += result.completedCycles;
+
+    // Aggregate step statistics from spin results
+    for (const spin of result.spinResults) {
+      const stepStats = stepStatsMap.get(spin.stepIndex);
+      if (stepStats) {
+        stepStats.timesReached++;
+
+        if (spin.isWin) {
+          stepStats.timesWon++;
+
+          // Track tier outcomes if tier was triggered
+          if (spin.tierTriggered) {
+            const tierStats = stepStats.tierOutcomes.get(spin.tierTriggered);
+            if (tierStats) {
+              tierStats.count++;
+              tierStats.totalPayout += spin.payout;
+            } else {
+              stepStats.tierOutcomes.set(spin.tierTriggered, {
+                count: 1,
+                totalPayout: spin.payout,
+              });
+            }
+          }
+        } else {
+          stepStats.timesLost++;
+        }
+      }
+    }
 
     // Report progress at each batch
     if (onProgress && (i + 1) % batchSize === 0) {
@@ -78,6 +132,7 @@ export async function runSimulations(
     : 0;
   const profitCount = finalBankrolls.filter(b => b > strategy.initialBankroll).length;
   const maxDrawdownAvg = totalMaxDrawdown / numSimulations;
+  const avgCompletedCycles = totalCompletedCycles / numSimulations;
 
   // Calculate expected value per spin
   let totalEV = 0;
@@ -88,6 +143,22 @@ export async function runSimulations(
 
   // Create distribution buckets for histogram
   const distribution = createDistribution(finalBankrolls, 20);
+
+  // Convert step statistics map to array
+  const stepStatistics: StepStatistics[] = Array.from(stepStatsMap.entries())
+    .map(([stepIndex, stats]) => ({
+      stepIndex,
+      stepId: stats.stepId,
+      timesReached: stats.timesReached,
+      timesWon: stats.timesWon,
+      timesLost: stats.timesLost,
+      tierOutcomes: Array.from(stats.tierOutcomes.entries()).map(([tierName, data]) => ({
+        tierName,
+        count: data.count,
+        totalPayout: data.totalPayout,
+      })),
+    }))
+    .sort((a, b) => a.stepIndex - b.stepIndex);
 
   return {
     strategyId: strategy.id,
@@ -103,6 +174,8 @@ export async function runSimulations(
     finalBankrollDistribution: distribution,
     allSimulations,
     timestamp: Date.now(),
+    stepStatistics,
+    avgCompletedCycles,
   };
 }
 

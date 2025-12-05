@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { BettingStrategy, SimulationResults } from '@/app/lib/types';
 import { getAllStrategies, saveSimulationResult } from '@/app/lib/storage';
-import { PRELOADED_STRATEGIES } from '@/app/lib/preloadedStrategies';
 import { Button } from '@/app/components/Button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/app/components/Card';
 import { Select } from '@/app/components/Select';
@@ -13,9 +13,10 @@ import { ResultsSummary } from '@/app/components/ResultsSummary';
 import { BankrollChart } from '@/app/components/BankrollChart';
 import { DistributionChart } from '@/app/components/DistributionChart';
 import { Disclaimer } from '@/app/components/Disclaimer';
-import { ChevronDown, Download, Trash2 } from 'lucide-react';
+import { Download, Trash2 } from 'lucide-react';
 
-export default function SimulatorPage() {
+function SimulatorContent() {
+  const searchParams = useSearchParams();
   const [strategies, setStrategies] = useState<BettingStrategy[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>('');
   const [results, setResults] = useState<SimulationResults | null>(null);
@@ -24,10 +25,15 @@ export default function SimulatorPage() {
   useEffect(() => {
     const allStrategies = getAllStrategies();
     setStrategies(allStrategies);
-    if (allStrategies.length > 0) {
+
+    // Check for strategy query parameter from deep link
+    const strategyParam = searchParams.get('strategy');
+    if (strategyParam && allStrategies.some(s => s.id === strategyParam)) {
+      setSelectedStrategyId(strategyParam);
+    } else if (allStrategies.length > 0) {
       setSelectedStrategyId(allStrategies[0].id);
     }
-  }, []);
+  }, [searchParams]);
 
   const selectedStrategy = strategies.find((s) => s.id === selectedStrategyId);
 
@@ -275,5 +281,20 @@ export default function SimulatorPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SimulatorPage() {
+  return (
+    <Suspense fallback={
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-white mb-2">Simulation Engine</h1>
+          <p className="text-casino-muted">Loading...</p>
+        </div>
+      </div>
+    }>
+      <SimulatorContent />
+    </Suspense>
   );
 }

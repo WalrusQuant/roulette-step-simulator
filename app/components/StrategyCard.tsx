@@ -31,7 +31,9 @@ export function StrategyCard({
             <CardTitle className="flex items-center gap-2">
               {strategy.name}
               {strategy.isPreloaded && (
-                <Lock className="w-4 h-4 text-casino-muted" title="Preloaded strategy" />
+                <span title="Preloaded strategy">
+                  <Lock className="w-4 h-4 text-casino-muted" />
+                </span>
               )}
             </CardTitle>
             <CardDescription>{strategy.description}</CardDescription>

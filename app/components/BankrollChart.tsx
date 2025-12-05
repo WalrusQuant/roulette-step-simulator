@@ -93,98 +93,120 @@ export function BankrollChart({
     Math.ceil(maxBankroll * 1.1),
   ];
 
-  const Chart = chartType === 'area' ? AreaChart : LineChart;
-  const DataComponent = chartType === 'area' ? Area : Line;
+  const commonChartProps = {
+    data: chartData,
+    margin: { top: 10, right: 10, left: 0, bottom: 0 },
+  };
+
+  const commonChildren = (
+    <>
+      <defs>
+        <linearGradient id="bankrollGradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="5%" stopColor={CHART_COLORS.primary} stopOpacity={0.3} />
+          <stop offset="95%" stopColor={CHART_COLORS.primary} stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <CartesianGrid strokeDasharray="3 3" stroke="#30363D" />
+      <XAxis
+        dataKey="spin"
+        stroke="#8B949E"
+        tick={{ fill: '#8B949E', fontSize: 12 }}
+        tickLine={{ stroke: '#30363D' }}
+        axisLine={{ stroke: '#30363D' }}
+        label={{
+          value: 'Spin',
+          position: 'bottom',
+          fill: '#8B949E',
+          fontSize: 12,
+        }}
+      />
+      <YAxis
+        domain={yDomain}
+        stroke="#8B949E"
+        tick={{ fill: '#8B949E', fontSize: 12 }}
+        tickLine={{ stroke: '#30363D' }}
+        axisLine={{ stroke: '#30363D' }}
+        tickFormatter={(value) => `$${value}`}
+      />
+      <Tooltip
+        contentStyle={{
+          backgroundColor: '#161B22',
+          border: '1px solid #30363D',
+          borderRadius: '8px',
+          color: '#C9D1D9',
+        }}
+        formatter={(value: number) => [formatCurrency(value), 'Bankroll']}
+        labelFormatter={(label) => `Spin ${label}`}
+      />
+      {showTarget && (
+        <ReferenceLine
+          y={targetBankroll}
+          stroke={CHART_COLORS.success}
+          strokeDasharray="5 5"
+          label={{
+            value: 'Target',
+            position: 'right',
+            fill: CHART_COLORS.success,
+            fontSize: 12,
+          }}
+        />
+      )}
+      {showInitial && (
+        <ReferenceLine
+          y={initialBankroll}
+          stroke={CHART_COLORS.neutral}
+          strokeDasharray="5 5"
+          label={{
+            value: 'Initial',
+            position: 'right',
+            fill: CHART_COLORS.neutral,
+            fontSize: 12,
+          }}
+        />
+      )}
+      <ReferenceLine
+        y={0}
+        stroke={CHART_COLORS.danger}
+        strokeDasharray="5 5"
+        label={{
+          value: 'Bankruptcy',
+          position: 'right',
+          fill: CHART_COLORS.danger,
+          fontSize: 12,
+        }}
+      />
+    </>
+  );
 
   return (
     <div className="w-full" style={{ height }}>
       <ResponsiveContainer>
-        <Chart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id="bankrollGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor={CHART_COLORS.primary} stopOpacity={0.3} />
-              <stop offset="95%" stopColor={CHART_COLORS.primary} stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid strokeDasharray="3 3" stroke="#30363D" />
-          <XAxis
-            dataKey="spin"
-            stroke="#8B949E"
-            tick={{ fill: '#8B949E', fontSize: 12 }}
-            tickLine={{ stroke: '#30363D' }}
-            axisLine={{ stroke: '#30363D' }}
-            label={{
-              value: 'Spin',
-              position: 'bottom',
-              fill: '#8B949E',
-              fontSize: 12,
-            }}
-          />
-          <YAxis
-            domain={yDomain}
-            stroke="#8B949E"
-            tick={{ fill: '#8B949E', fontSize: 12 }}
-            tickLine={{ stroke: '#30363D' }}
-            axisLine={{ stroke: '#30363D' }}
-            tickFormatter={(value) => `$${value}`}
-          />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#161B22',
-              border: '1px solid #30363D',
-              borderRadius: '8px',
-              color: '#C9D1D9',
-            }}
-            formatter={(value: number) => [formatCurrency(value), 'Bankroll']}
-            labelFormatter={(label) => `Spin ${label}`}
-          />
-          {showTarget && (
-            <ReferenceLine
-              y={targetBankroll}
-              stroke={CHART_COLORS.success}
-              strokeDasharray="5 5"
-              label={{
-                value: 'Target',
-                position: 'right',
-                fill: CHART_COLORS.success,
-                fontSize: 12,
-              }}
+        {chartType === 'area' ? (
+          <AreaChart {...commonChartProps}>
+            {commonChildren}
+            <Area
+              type="monotone"
+              dataKey="bankroll"
+              stroke={CHART_COLORS.primary}
+              strokeWidth={2}
+              fill="url(#bankrollGradient)"
+              dot={false}
+              activeDot={{ r: 4, fill: CHART_COLORS.primary }}
             />
-          )}
-          {showInitial && (
-            <ReferenceLine
-              y={initialBankroll}
-              stroke={CHART_COLORS.neutral}
-              strokeDasharray="5 5"
-              label={{
-                value: 'Initial',
-                position: 'right',
-                fill: CHART_COLORS.neutral,
-                fontSize: 12,
-              }}
+          </AreaChart>
+        ) : (
+          <LineChart {...commonChartProps}>
+            {commonChildren}
+            <Line
+              type="monotone"
+              dataKey="bankroll"
+              stroke={CHART_COLORS.primary}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, fill: CHART_COLORS.primary }}
             />
-          )}
-          <ReferenceLine
-            y={0}
-            stroke={CHART_COLORS.danger}
-            strokeDasharray="5 5"
-            label={{
-              value: 'Bankruptcy',
-              position: 'right',
-              fill: CHART_COLORS.danger,
-              fontSize: 12,
-            }}
-          />
-          <DataComponent
-            type="monotone"
-            dataKey="bankroll"
-            stroke={CHART_COLORS.primary}
-            strokeWidth={2}
-            fill={chartType === 'area' ? 'url(#bankrollGradient)' : undefined}
-            dot={false}
-            activeDot={{ r: 4, fill: CHART_COLORS.primary }}
-          />
-        </Chart>
+          </LineChart>
+        )}
       </ResponsiveContainer>
     </div>
   );

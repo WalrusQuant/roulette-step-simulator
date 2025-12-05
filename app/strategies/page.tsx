@@ -172,15 +172,10 @@ export default function StrategiesPage() {
               onChange={handleImport}
               className="hidden"
             />
-            <Button
-              variant="secondary"
-              className="flex items-center gap-2 cursor-pointer"
-              onClick={() => {}}
-              as="span"
-            >
+            <span className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-casino-dark border border-casino-border text-casino-text hover:bg-casino-dark/80 hover:border-casino-muted transition-colors cursor-pointer">
               <Upload className="w-4 h-4" />
               Import
-            </Button>
+            </span>
           </label>
         </div>
       </div>

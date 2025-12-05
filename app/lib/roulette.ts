@@ -9,6 +9,10 @@ import {
   ColumnType,
   DozenType,
   EvenMoneyType,
+  BetSizing,
+  WinTier,
+  StepAction,
+  StepActionType,
   PAYOUTS,
   PROBABILITIES,
   RED_NUMBERS,
@@ -191,13 +195,25 @@ export function getBetProbability(betType: BetType): number {
 }
 
 /**
- * Calculate actual bet amount based on sizing and current bankroll
+ * Context for calculating bet amounts in advanced mode
+ */
+export interface BetContext {
+  bankroll: number;
+  carryAmount: number;        // Amount carried from previous step
+  bulletSize: number;         // Fixed bullet size from strategy
+  numBetsInStep: number;      // Number of bets in current step (for carry_split)
+  previousWinnings: number;   // Legacy: for let-it-ride
+}
+
+/**
+ * Calculate actual bet amount based on sizing and context
  */
 export function calculateBetAmount(
-  sizing: number | 'all-in' | 'half-bankroll' | 'let-it-ride',
+  sizing: BetSizing,
   bankroll: number,
   previousWinnings: number = 0
 ): number {
+  // Legacy sizing options
   switch (sizing) {
     case 'all-in':
       return bankroll;
@@ -206,12 +222,47 @@ export function calculateBetAmount(
     case 'let-it-ride':
       return previousWinnings > 0 ? previousWinnings : bankroll;
     default:
-      return Math.min(sizing, bankroll);
+      if (typeof sizing === 'number') {
+        return Math.min(sizing, bankroll);
+      }
+      // New sizing options handled by calculateBetAmountAdvanced
+      return 0;
   }
 }
 
 /**
- * Handle multiple bets on a single spin
+ * Calculate bet amount with full context (for advanced step progression)
+ */
+export function calculateBetAmountAdvanced(
+  sizing: BetSizing,
+  context: BetContext
+): number {
+  const { bankroll, carryAmount, bulletSize, numBetsInStep, previousWinnings } = context;
+
+  if (typeof sizing === 'number') {
+    return Math.min(sizing, bankroll);
+  }
+
+  switch (sizing) {
+    case 'all-in':
+      return bankroll;
+    case 'half-bankroll':
+      return Math.floor(bankroll / 2);
+    case 'let-it-ride':
+      return previousWinnings > 0 ? previousWinnings : bankroll;
+    case 'bullet':
+      return Math.min(bulletSize, bankroll);
+    case 'carry':
+      return carryAmount;
+    case 'carry_split':
+      return numBetsInStep > 0 ? Math.floor(carryAmount / numBetsInStep) : carryAmount;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Handle multiple bets on a single spin (legacy)
  */
 export function handleMultipleBets(
   number: RouletteNumber,
@@ -238,6 +289,67 @@ export function handleMultipleBets(
 }
 
 /**
+ * Handle multiple bets with advanced context (for win tier system)
+ */
+export function handleMultipleBetsAdvanced(
+  number: RouletteNumber,
+  bets: Bet[],
+  context: BetContext
+): { totalPayout: number; profit: number; totalBetAmount: number; anyWin: boolean; winsCount: number } {
+  let totalPayout = 0;
+  let totalBetAmount = 0;
+  let anyWin = false;
+  let winsCount = 0;
+
+  // Update context with number of bets for carry_split calculation
+  const betContext = { ...context, numBetsInStep: bets.length };
+
+  for (const bet of bets) {
+    const betAmount = calculateBetAmountAdvanced(bet.betAmount, betContext);
+    totalBetAmount += betAmount;
+
+    if (checkBet(number, bet)) {
+      totalPayout += calculatePayout(bet.betType, betAmount);
+      anyWin = true;
+      winsCount++;
+    }
+  }
+
+  const profit = totalPayout - totalBetAmount;
+  return { totalPayout, profit, totalBetAmount, anyWin, winsCount };
+}
+
+/**
+ * Find the matching win tier for a given payout
+ * Win tiers are evaluated in order - first match wins
+ */
+export function findMatchingWinTier(winTiers: WinTier[], payout: number): WinTier | null {
+  for (const tier of winTiers) {
+    const meetsMin = payout >= tier.minPayout;
+    const meetsMax = tier.maxPayout === undefined || payout < tier.maxPayout;
+    if (meetsMin && meetsMax) {
+      return tier;
+    }
+  }
+  return null;
+}
+
+/**
+ * Check if a step uses the advanced win tier system
+ */
+export function isAdvancedStep(step: BetStep): boolean {
+  return step.winTiers !== undefined && step.winTiers.length > 0;
+}
+
+/**
+ * Check if a strategy uses the advanced system (has bulletSize or any step with winTiers)
+ */
+export function isAdvancedStrategy(strategy: BettingStrategy): boolean {
+  if (strategy.bulletSize !== undefined) return true;
+  return strategy.steps.some(step => isAdvancedStep(step));
+}
+
+/**
  * Calculate expected value for a betting strategy step
  */
 export function calculateExpectedValue(bets: Bet[], baseAmount: number = 1): number {
@@ -258,9 +370,72 @@ export function calculateExpectedValue(bets: Bet[], baseAmount: number = 1): num
 }
 
 /**
+ * Execute a step action and return the new state
+ */
+function executeStepAction(
+  action: StepAction,
+  currentStepIndex: number,
+  payout: number,
+  strategy: BettingStrategy
+): { newStepIndex: number; newCarry: number; pocketAmount: number } {
+  let pocketAmount = 0;
+  let newCarry = 0;
+
+  // Handle pocketing
+  if (action.pocket !== undefined) {
+    if (action.pocket === 'all') {
+      pocketAmount = payout;
+    } else {
+      pocketAmount = Math.min(action.pocket, payout);
+    }
+  }
+
+  // Handle carry forward
+  if (action.carryAmount !== undefined) {
+    if (action.carryAmount === 'all') {
+      newCarry = payout;
+    } else if (action.carryAmount === 'remainder') {
+      newCarry = payout - pocketAmount;
+    } else {
+      newCarry = Math.min(action.carryAmount, payout - pocketAmount);
+    }
+  }
+
+  // Determine next step index
+  let newStepIndex = currentStepIndex;
+  switch (action.type) {
+    case 'next_step':
+      newStepIndex = currentStepIndex + 1;
+      if (newStepIndex >= strategy.steps.length) {
+        newStepIndex = 0; // Wrap around = restart
+      }
+      break;
+    case 'repeat_step':
+      newStepIndex = currentStepIndex; // Stay on same step
+      break;
+    case 'goto_step':
+      if (action.targetStepId) {
+        const targetIndex = strategy.steps.findIndex(s => s.id === action.targetStepId);
+        newStepIndex = targetIndex >= 0 ? targetIndex : 0;
+      }
+      break;
+    case 'restart':
+      newStepIndex = 0;
+      newCarry = 0; // Clear carry on restart
+      break;
+  }
+
+  return { newStepIndex, newCarry, pocketAmount };
+}
+
+/**
  * Run a single simulation of a betting strategy
+ * Supports both legacy mode and advanced win tier mode
  */
 export function runSingleSimulation(strategy: BettingStrategy): SingleSimulationResult {
+  const useAdvancedMode = isAdvancedStrategy(strategy);
+  const bulletSize = strategy.bulletSize || strategy.initialBankroll; // Default to bankroll if no bullet
+
   let bankroll = strategy.initialBankroll;
   const bankrollHistory: number[] = [bankroll];
   const spinResults: SpinResult[] = [];
@@ -268,7 +443,10 @@ export function runSingleSimulation(strategy: BettingStrategy): SingleSimulation
   let maxDrawdown = 0;
   let iterations = 0;
   let currentStepIndex = 0;
-  let previousWinnings = 0;
+  let carryAmount = 0;           // Money carried between steps (not in bankroll)
+  let previousWinnings = 0;      // Legacy: for let-it-ride
+  let insufficientFunds = false;
+  let completedCycles = 0;
 
   while (
     bankroll > 0 &&
@@ -280,36 +458,185 @@ export function runSingleSimulation(strategy: BettingStrategy): SingleSimulation
     if (!currentStep) {
       // No more steps, reset to beginning
       currentStepIndex = 0;
+      carryAmount = 0;
       previousWinnings = 0;
+      completedCycles++;
       continue;
     }
+
+    // For step 0 in advanced mode, take a new bullet from bankroll
+    if (useAdvancedMode && currentStepIndex === 0 && carryAmount === 0) {
+      if (bankroll < bulletSize) {
+        insufficientFunds = true;
+        break;
+      }
+      // Take bullet from bankroll into carry
+      bankroll -= bulletSize;
+      carryAmount = bulletSize;
+    }
+
+    // Build bet context
+    const betContext: BetContext = {
+      bankroll,
+      carryAmount,
+      bulletSize,
+      numBetsInStep: currentStep.bets.length,
+      previousWinnings,
+    };
 
     // Calculate total bet amount for this step
     let totalBetAmount = 0;
     for (const bet of currentStep.bets) {
-      totalBetAmount += calculateBetAmount(bet.betAmount, bankroll, previousWinnings);
+      if (useAdvancedMode) {
+        totalBetAmount += calculateBetAmountAdvanced(bet.betAmount, betContext);
+      } else {
+        totalBetAmount += calculateBetAmount(bet.betAmount, bankroll, previousWinnings);
+      }
     }
 
-    // Skip if can't afford the bets
-    if (totalBetAmount > bankroll) {
-      break;
+    // Can't afford the bets
+    if (useAdvancedMode) {
+      // In advanced mode, bets come from carry, not bankroll
+      if (totalBetAmount > carryAmount) {
+        // Can't continue - treat as loss and restart
+        currentStepIndex = 0;
+        carryAmount = 0;
+        continue;
+      }
+    } else {
+      if (totalBetAmount > bankroll) {
+        insufficientFunds = true;
+        break;
+      }
     }
 
     // Spin the wheel
     const number = spinWheel();
-    const result = handleMultipleBets(number, currentStep.bets, bankroll, previousWinnings);
+    let result;
+    if (useAdvancedMode) {
+      result = handleMultipleBetsAdvanced(number, currentStep.bets, betContext);
+    } else {
+      result = { ...handleMultipleBets(number, currentStep.bets, bankroll, previousWinnings), winsCount: 0 };
+    }
 
-    // Update bankroll
-    bankroll = bankroll - result.totalBetAmount + result.totalPayout;
-    bankrollHistory.push(bankroll);
+    // Update bankroll/carry based on mode
+    if (useAdvancedMode) {
+      // In advanced mode, bets come from carry, payout goes to carry
+      carryAmount = carryAmount - result.totalBetAmount + result.totalPayout;
+    } else {
+      bankroll = bankroll - result.totalBetAmount + result.totalPayout;
+    }
+
+    // Record bankroll for history (in advanced mode, add carry to show total value)
+    const totalValue = useAdvancedMode ? bankroll + carryAmount : bankroll;
+    bankrollHistory.push(totalValue);
 
     // Track max bankroll and drawdown
-    if (bankroll > maxBankroll) {
-      maxBankroll = bankroll;
+    if (totalValue > maxBankroll) {
+      maxBankroll = totalValue;
     }
-    const currentDrawdown = maxBankroll - bankroll;
+    const currentDrawdown = maxBankroll - totalValue;
     if (currentDrawdown > maxDrawdown) {
       maxDrawdown = currentDrawdown;
+    }
+
+    // Determine action to take
+    let tierTriggered: string | undefined;
+    let actionTaken: StepActionType;
+    const originalStepIndex = currentStepIndex; // Save before action modifies it
+
+    if (useAdvancedMode && isAdvancedStep(currentStep)) {
+      // Advanced mode with win tiers
+      if (result.anyWin && currentStep.winTiers) {
+        const matchingTier = findMatchingWinTier(currentStep.winTiers, result.totalPayout);
+        if (matchingTier) {
+          tierTriggered = matchingTier.name;
+          actionTaken = matchingTier.action.type;
+
+          const actionResult = executeStepAction(
+            matchingTier.action,
+            currentStepIndex,
+            carryAmount,
+            strategy
+          );
+
+          // Pocket goes to bankroll
+          bankroll += actionResult.pocketAmount;
+          carryAmount = actionResult.newCarry;
+
+          // Track cycle completion
+          if (actionResult.newStepIndex === 0 && currentStepIndex !== 0) {
+            completedCycles++;
+          }
+          currentStepIndex = actionResult.newStepIndex;
+        } else {
+          // Win but no matching tier - default to next step
+          actionTaken = 'next_step';
+          currentStepIndex++;
+          if (currentStepIndex >= strategy.steps.length) {
+            currentStepIndex = 0;
+            completedCycles++;
+          }
+        }
+      } else {
+        // Loss - use onLoss action or default restart
+        actionTaken = currentStep.onLoss?.type || 'restart';
+        if (currentStep.onLoss) {
+          const actionResult = executeStepAction(
+            currentStep.onLoss,
+            currentStepIndex,
+            carryAmount,
+            strategy
+          );
+          bankroll += actionResult.pocketAmount;
+          carryAmount = actionResult.newCarry;
+          currentStepIndex = actionResult.newStepIndex;
+        } else {
+          // Default: restart on loss
+          currentStepIndex = 0;
+          carryAmount = 0;
+        }
+      }
+    } else {
+      // Legacy mode
+      if (result.anyWin) {
+        previousWinnings = result.totalPayout;
+        actionTaken = currentStep.continueOnWin ? 'next_step' : 'restart';
+
+        if (currentStep.continueOnWin) {
+          if (currentStep.nextStepOnWin) {
+            const nextIndex = strategy.steps.findIndex(s => s.id === currentStep.nextStepOnWin);
+            currentStepIndex = nextIndex >= 0 ? nextIndex : currentStepIndex + 1;
+          } else {
+            currentStepIndex++;
+          }
+          if (currentStepIndex >= strategy.steps.length) {
+            currentStepIndex = 0;
+            previousWinnings = 0;
+            completedCycles++;
+          }
+        } else {
+          currentStepIndex = 0;
+          previousWinnings = 0;
+        }
+      } else {
+        previousWinnings = 0;
+        actionTaken = currentStep.resetOnLoss ? 'restart' : 'next_step';
+
+        if (currentStep.resetOnLoss) {
+          currentStepIndex = 0;
+        } else {
+          if (currentStep.nextStepOnLoss) {
+            const nextIndex = strategy.steps.findIndex(s => s.id === currentStep.nextStepOnLoss);
+            currentStepIndex = nextIndex >= 0 ? nextIndex : currentStepIndex + 1;
+          } else {
+            currentStepIndex++;
+          }
+          if (currentStepIndex >= strategy.steps.length) {
+            currentStepIndex = 0;
+          }
+        }
+      }
     }
 
     // Check max drawdown limit
@@ -320,16 +647,20 @@ export function runSingleSimulation(strategy: BettingStrategy): SingleSimulation
         payout: result.totalPayout,
         profit: result.profit,
         stepId: currentStep.id,
+        stepIndex: originalStepIndex,
+        tierTriggered,
+        actionTaken,
       });
 
       return {
-        finalBankroll: bankroll,
+        finalBankroll: useAdvancedMode ? bankroll + carryAmount : bankroll,
         iterations: iterations + 1,
         goalReached: false,
         maxDrawdown,
         bankrollHistory,
         spinResults,
         endReason: 'max_drawdown',
+        completedCycles,
       };
     }
 
@@ -340,67 +671,47 @@ export function runSingleSimulation(strategy: BettingStrategy): SingleSimulation
       payout: result.totalPayout,
       profit: result.profit,
       stepId: currentStep.id,
+      stepIndex: originalStepIndex,
+      tierTriggered,
+      actionTaken,
     });
 
-    // Determine next step
-    if (result.anyWin) {
-      previousWinnings = result.totalPayout;
-      if (currentStep.continueOnWin) {
-        // Move to next step or wrap around
-        if (currentStep.nextStepOnWin) {
-          const nextIndex = strategy.steps.findIndex(s => s.id === currentStep.nextStepOnWin);
-          currentStepIndex = nextIndex >= 0 ? nextIndex : currentStepIndex + 1;
-        } else {
-          currentStepIndex++;
-        }
-        if (currentStepIndex >= strategy.steps.length) {
-          currentStepIndex = 0;
-          previousWinnings = 0;
-        }
-      } else {
-        // Reset on win
-        currentStepIndex = 0;
-        previousWinnings = 0;
+    iterations++;
+
+    // Update bankroll check for advanced mode
+    if (useAdvancedMode) {
+      const total = bankroll + carryAmount;
+      if (total >= strategy.targetBankroll) {
+        break; // Goal reached
       }
-    } else {
-      previousWinnings = 0;
-      if (currentStep.resetOnLoss) {
-        currentStepIndex = 0;
-      } else {
-        // Move to next step or use custom navigation
-        if (currentStep.nextStepOnLoss) {
-          const nextIndex = strategy.steps.findIndex(s => s.id === currentStep.nextStepOnLoss);
-          currentStepIndex = nextIndex >= 0 ? nextIndex : currentStepIndex + 1;
-        } else {
-          currentStepIndex++;
-        }
-        if (currentStepIndex >= strategy.steps.length) {
-          currentStepIndex = 0;
-        }
+      if (bankroll <= 0 && carryAmount <= 0) {
+        break; // Bankruptcy
       }
     }
-
-    iterations++;
   }
 
   // Determine end reason
+  const finalBankroll = useAdvancedMode ? bankroll + carryAmount : bankroll;
   let endReason: SingleSimulationResult['endReason'];
-  if (bankroll <= 0) {
+  if (finalBankroll <= 0) {
     endReason = 'bankruptcy';
-  } else if (bankroll >= strategy.targetBankroll) {
+  } else if (finalBankroll >= strategy.targetBankroll) {
     endReason = 'goal_reached';
+  } else if (insufficientFunds) {
+    endReason = 'insufficient_funds';
   } else {
     endReason = 'max_iterations';
   }
 
   return {
-    finalBankroll: bankroll,
+    finalBankroll,
     iterations,
-    goalReached: bankroll >= strategy.targetBankroll,
+    goalReached: finalBankroll >= strategy.targetBankroll,
     maxDrawdown,
     bankrollHistory,
     spinResults,
     endReason,
+    completedCycles,
   };
 }
 
@@ -426,8 +737,16 @@ export function formatBet(bet: Bet): string {
     amountStr = 'All-In';
   } else if (betAmount === 'half-bankroll') {
     amountStr = 'Half Bankroll';
-  } else {
+  } else if (betAmount === 'let-it-ride') {
     amountStr = 'Let It Ride';
+  } else if (betAmount === 'bullet') {
+    amountStr = 'Bullet';
+  } else if (betAmount === 'carry') {
+    amountStr = 'Carry';
+  } else if (betAmount === 'carry_split') {
+    amountStr = 'Split Carry';
+  } else {
+    amountStr = 'Unknown';
   }
 
   let detailStr = '';
